@@ -1,34 +1,29 @@
 public final class ConnectionFactory {
-  private static Connection dbConnection;
+  private static final ThreadLocal<Connection> connectionHolder
+                       = new ThreadLocal<Connection>() {
+   @Override public Connection initialValue() {
+     try {
+       Connection dbConnection =
+           DriverManager.getConnection("connection string");
+       return dbConnection;
+     } catch (SQLException e) {
+       return null;
+     }
+   }
+ };
+ 
   // Other fields ...
  
   static {
-    Thread dbInitializerThread = new Thread(new Runnable() {
-        @Override public void run() {
-          // Initialize the database connection
-          try {
-            dbConnection = DriverManager.getConnection("connection string");
-          } catch (SQLException e) {
-            dbConnection = null;
-          }
-        }
-    });
- 
-    // Other initialization, for example, start other threads
- 
-    dbInitializerThread.start();
-    try {
-      dbInitializerThread.join();
-    } catch (InterruptedException ie) {
-      throw new AssertionError(ie);
-    }
+    // Other initialization (do not start any threads)
   }
  
   public static Connection getConnection() {
-    if (dbConnection == null) {
+    Connection connection = connectionHolder.get();
+    if (connection == null) {
       throw new IllegalStateException("Error initializing connection");
     }
-    return dbConnection;
+    return connection;
   }
  
   public static void main(String[] args) {
