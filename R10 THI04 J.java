@@ -1,45 +1,68 @@
-// Thread-safe class
-public final class SocketReader implements Runnable {
-  private final Socket socket;
-  private final BufferedReader in;
-  private volatile boolean done = false;
-  private final Object lock = new Object();
+public final class DBConnector implements Runnable {
+  private final String query;
+  private volatile Statement stmt;
  
-  public SocketReader(String host, int port) throws IOException {
-    this.socket = new Socket(host, port);
-    this.in = new BufferedReader(
-        new InputStreamReader(this.socket.getInputStream())
-    );
+  DBConnector(String query) {
+    this.query = query;
   }
  
-  // Only one thread can use the socket at a particular time
+  private static final ThreadLocal<Connection> connectionHolder =
+                                       new ThreadLocal<Connection>() {
+    Connection connection = null;
+ 
+    @Override public Connection initialValue() {
+      try {
+        // ...
+        connection = DriverManager.getConnection(
+            "jdbc:driver:name",
+            "username",
+            "password"
+        );
+      } catch (SQLException e) {
+        // Forward to handler
+      }
+      return connection;
+    }
+  };
+ 
+  public Connection getConnection() {
+    return connectionHolder.get();
+  }
+ 
+  public boolean cancelStatement() { // Allows client to cancel statement
+    Statement tmpStmt = stmt;
+    if (tmpStmt != null) {
+      try {
+        tmpStmt.cancel();
+        return true;
+      } catch (SQLException e) {
+        // Forward to handler
+      }
+    }
+    return false;
+  }
+ 
   @Override public void run() {
     try {
-      synchronized (lock) {
-        readData();
+      if (getConnection() != null) {
+        stmt = getConnection().createStatement();
       }
-    } catch (IOException ie) {
+      if (stmt == null || (stmt.getConnection() != getConnection())) {
+        throw new IllegalStateException();
+      }
+      ResultSet rs = stmt.executeQuery(query);
+      // ...
+    } catch (SQLException e) {
       // Forward to handler
     }
+    // ...
   }
  
-  public void readData() throws IOException {
-    String string;
-    while (!done && (string = in.readLine()) != null) {
-      // Blocks until end of stream (null)
-    }
-  }
- 
-  public void shutdown() {
-    done = true;
-  }
- 
-  public static void main(String[] args)
-                          throws IOException, InterruptedException {
-    SocketReader reader = new SocketReader("somehost", 25);
-    Thread thread = new Thread(reader);
+  public static void main(String[] args) throws InterruptedException {
+    DBConnector connector = new DBConnector("suitable query");
+    Thread thread = new Thread(connector);
     thread.start();
-    Thread.sleep(1000);
-    reader.shutdown(); // Shut down the thread
+    Thread.sleep(5000);
+    connector.cancelStatement();
   }
 }
